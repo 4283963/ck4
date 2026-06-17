@@ -44,3 +44,22 @@ class FrameData(BaseModel):
     timestamp: float
     drone_positions: dict
     current_distances: List[ShortestDistanceResult]
+
+
+class WindParams(BaseModel):
+    wind_angle: float
+    wind_level: float
+
+
+class WindAnalysisResponse(BaseModel):
+    wind_angle: float
+    wind_level: float
+    wind_speed_mps: float
+    wind_vector: List[float]
+    original_trajectories: List[DroneTrajectory]
+    wind_trajectories: List[DroneTrajectory]
+    original_shortest_distances: List[ShortestDistanceResult]
+    wind_shortest_distances: List[ShortestDistanceResult]
+    original_overlaps: List[OverlapResult]
+    wind_overlaps: List[OverlapResult]
+    time_range: List[float]

@@ -427,6 +427,144 @@
         ::-webkit-scrollbar-thumb:hover {
             background: rgba(0, 212, 255, 0.5);
         }
+
+        .wind-section {
+            border: 1px solid rgba(255, 152, 67, 0.3);
+            background: rgba(255, 152, 67, 0.05);
+        }
+
+        .wind-section h3 {
+            color: #ff9f43;
+        }
+
+        .wind-section h3::before {
+            background: linear-gradient(180deg, #ff9f43, #ff6348);
+        }
+
+        .wind-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .wind-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .wind-label {
+            font-size: 12px;
+            color: #aaa;
+            min-width: 50px;
+            flex-shrink: 0;
+        }
+
+        .wind-slider-wrap {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .wind-slider-wrap input[type="range"] {
+            flex: 1;
+        }
+
+        .wind-val {
+            font-size: 12px;
+            font-family: "Courier New", monospace;
+            color: #ff9f43;
+            min-width: 55px;
+            text-align: right;
+        }
+
+        .wind-apply-btn {
+            width: 100%;
+            padding: 10px;
+            background: linear-gradient(135deg, #ff9f43, #ff6348);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 6px;
+        }
+
+        .wind-apply-btn:hover {
+            transform: scale(1.02);
+            box-shadow: 0 0 15px rgba(255, 152, 67, 0.4);
+        }
+
+        .wind-apply-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .wind-reset-btn {
+            width: 100%;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            color: #aaa;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 6px;
+        }
+
+        .wind-reset-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: #fff;
+        }
+
+        .wind-info {
+            font-size: 11px;
+            color: #888;
+            margin-top: 8px;
+            line-height: 1.5;
+        }
+
+        .wind-active-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            background: rgba(255, 152, 67, 0.2);
+            border: 1px solid rgba(255, 152, 67, 0.5);
+            border-radius: 4px;
+            font-size: 10px;
+            color: #ff9f43;
+            margin-left: 8px;
+        }
+
+        .metric-compare {
+            display: flex;
+            gap: 8px;
+            align-items: baseline;
+        }
+
+        .metric-original {
+            font-size: 14px;
+            color: #888;
+            text-decoration: line-through;
+        }
+
+        .metric-wind {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .metric-change-up {
+            color: #ff6b6b;
+            font-size: 11px;
+        }
+
+        .metric-change-down {
+            color: #4caf50;
+            font-size: 11px;
+        }
     </style>
 </head>
 <body>
@@ -484,6 +622,31 @@
                     <span>显示网格</span>
                     <div id="toggleGrid" class="toggle on"></div>
                 </div>
+                <div class="toggle-row">
+                    <span>显示风场轨迹</span>
+                    <div id="toggleWindTrajectory" class="toggle on"></div>
+                </div>
+            </div>
+
+            <div class="panel-section wind-section">
+                <h3>🌬️ 风向风速干扰模拟 <span id="windBadge" class="wind-active-badge" style="display:none">风场已激活</span></h3>
+                <div class="wind-row">
+                    <span class="wind-label">风向</span>
+                    <div class="wind-slider-wrap">
+                        <input type="range" id="windAngleSlider" min="0" max="360" value="45" step="5">
+                        <span class="wind-val" id="windAngleVal">45°</span>
+                    </div>
+                </div>
+                <div class="wind-row">
+                    <span class="wind-label">风力</span>
+                    <div class="wind-slider-wrap">
+                        <input type="range" id="windLevelSlider" min="0" max="12" value="3" step="0.5">
+                        <span class="wind-val" id="windLevelVal">3级</span>
+                    </div>
+                </div>
+                <div class="wind-info" id="windInfo">风速: 3.4 m/s | 偏移向量: (2.4, 2.4, 0.2) m/s</div>
+                <button id="windApplyBtn" class="wind-apply-btn">🌀 加入风场重新解算</button>
+                <button id="windResetBtn" class="wind-reset-btn">✕ 清除风场</button>
             </div>
 
             <div class="panel-section">
@@ -540,8 +703,19 @@
             showOverlap: true,
             showDistance: true,
             showGrid: true,
+            showWindTrajectory: true,
             droneColors: {},
-            bounds: { minX: 0, maxX: 300, minY: 0, maxY: 300, minZ: 0, maxZ: 150 }
+            bounds: { minX: 0, maxX: 300, minY: 0, maxY: 300, minZ: 0, maxZ: 150 },
+            windActive: false,
+            windAngle: 45,
+            windLevel: 3,
+            windTrajectories: [],
+            windShortestDistances: [],
+            windOverlaps: [],
+            originalShortestDistances: [],
+            originalOverlaps: [],
+            windVector: [0, 0, 0],
+            windSpeedMps: 0
         };
 
         const canvas = document.getElementById('trajectoryCanvas');
@@ -788,6 +962,82 @@
             });
         }
 
+        function drawWindTrajectories() {
+            if (!state.showWindTrajectory || !state.windActive) return;
+
+            state.windTrajectories.forEach(traj => {
+                const baseColor = state.droneColors[traj.drone_id];
+                if (!baseColor || traj.points.length < 2) return;
+
+                const windColor = baseColor + '25';
+                ctx.strokeStyle = windColor;
+                ctx.lineWidth = 2;
+                ctx.setLineDash([8, 4]);
+                ctx.beginPath();
+                traj.points.forEach((p, i) => {
+                    const pos = worldToScreen(safeNum(p.x), safeNum(p.y), safeNum(p.z));
+                    if (i === 0) ctx.moveTo(pos.x, pos.y);
+                    else ctx.lineTo(pos.x, pos.y);
+                });
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                const lastIdx = traj.points.findIndex(p => safeNum(p.timestamp) > state.currentTime);
+                const drawUpTo = lastIdx === -1 ? traj.points.length : lastIdx + 1;
+                if (drawUpTo >= 2) {
+                    ctx.strokeStyle = '#ff9f43';
+                    ctx.lineWidth = 2.5;
+                    ctx.shadowColor = '#ff9f43';
+                    ctx.shadowBlur = 6;
+                    ctx.setLineDash([6, 3]);
+                    ctx.beginPath();
+                    for (let i = 0; i < drawUpTo && i < traj.points.length; i++) {
+                        const p = traj.points[i];
+                        const pos = worldToScreen(safeNum(p.x), safeNum(p.y), safeNum(p.z));
+                        if (i === 0) ctx.moveTo(pos.x, pos.y);
+                        else ctx.lineTo(pos.x, pos.y);
+                    }
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    ctx.shadowBlur = 0;
+                }
+            });
+        }
+
+        function drawWindDriftArrows(currentPositions) {
+            if (!state.windActive || !state.showWindTrajectory) return;
+            Object.entries(currentPositions).forEach(([droneId, pos]) => {
+                if (!pos) return;
+                const windPos = getDronePositionAtTimeWind(droneId, state.currentTime);
+                if (!windPos) return;
+                const sp1 = worldToScreen(pos.x, pos.y, pos.z);
+                const sp2 = worldToScreen(windPos.x, windPos.y, windPos.z);
+                const dx = sp2.x - sp1.x;
+                const dy = sp2.y - sp1.y;
+                const len = Math.sqrt(dx * dx + dy * dy);
+                if (len < 3) return;
+
+                ctx.strokeStyle = 'rgba(255, 152, 67, 0.6)';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([3, 3]);
+                ctx.beginPath();
+                ctx.moveTo(sp1.x, sp1.y);
+                ctx.lineTo(sp2.x, sp2.y);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                const angle = Math.atan2(dy, dx);
+                const arrowLen = 6;
+                ctx.fillStyle = 'rgba(255, 152, 67, 0.8)';
+                ctx.beginPath();
+                ctx.moveTo(sp2.x, sp2.y);
+                ctx.lineTo(sp2.x - arrowLen * Math.cos(angle - 0.4), sp2.y - arrowLen * Math.sin(angle - 0.4));
+                ctx.lineTo(sp2.x - arrowLen * Math.cos(angle + 0.4), sp2.y - arrowLen * Math.sin(angle + 0.4));
+                ctx.closePath();
+                ctx.fill();
+            });
+        }
+
         function drawOverlapRegions() {
             if (!state.showOverlap) return;
 
@@ -895,6 +1145,7 @@
 
             drawGrid();
             drawFullTrajectories();
+            drawWindTrajectories();
             drawOverlapRegions();
 
             const currentPositions = {};
@@ -904,6 +1155,7 @@
             });
 
             drawDistanceLines(currentPositions);
+            drawWindDriftArrows(currentPositions);
             drawDrones(currentPositions);
 
             updateSidePanel(currentPositions);
@@ -935,46 +1187,78 @@
 
             const distMetrics = document.getElementById('distanceMetrics');
             distMetrics.innerHTML = '';
-            state.shortestDistances.slice(0, 3).forEach(d => {
+            const distData = state.windActive ? state.windShortestDistances : state.shortestDistances;
+            distData.slice(0, 3).forEach((d, idx) => {
                 const div = document.createElement('div');
                 div.className = 'metric-card';
                 const colorA = state.droneColors[d.drone_a];
                 const colorB = state.droneColors[d.drone_b];
+
+                let compareHtml = '';
+                if (state.windActive && state.originalShortestDistances[idx]) {
+                    const orig = state.originalShortestDistances[idx].distance;
+                    const wind = d.distance;
+                    const diff = wind - orig;
+                    const cls = diff >= 0 ? 'metric-change-up' : 'metric-change-down';
+                    const sign = diff >= 0 ? '+' : '';
+                    compareHtml = `<span class="${cls}">${sign}${diff.toFixed(2)}m</span>`;
+                }
+
                 div.innerHTML = `
                     <div class="metric-label">
                         <span style="color:${colorA}">${d.drone_a}</span> ↔ 
                         <span style="color:${colorB}">${d.drone_b}</span>
                     </div>
-                    <div class="metric-value">${d.distance.toFixed(2)} m</div>
+                    <div class="metric-compare">
+                        ${state.windActive && state.originalShortestDistances[idx] ? `<span class="metric-original">${orig_dist(idx)}</span>` : ''}
+                        <span class="metric-wind" style="color:${state.windActive ? '#ff9f43' : '#fff'}">${d.distance.toFixed(2)} m</span>
+                        ${compareHtml}
+                    </div>
                     <div class="metric-sub">@ t=${formatTime(d.timestamp)}</div>
                 `;
                 distMetrics.appendChild(div);
             });
-            if (state.shortestDistances.length === 0) {
+            if (distData.length === 0) {
                 distMetrics.innerHTML = '<div style="font-size:12px;color:#666;">暂无数据</div>';
             }
 
             const overlapMetrics = document.getElementById('overlapMetrics');
             overlapMetrics.innerHTML = '';
-            state.overlaps.slice(0, 3).forEach(o => {
+            const overlapData = state.windActive ? state.windOverlaps : state.overlaps;
+            overlapData.slice(0, 3).forEach((o, idx) => {
                 const div = document.createElement('div');
                 div.className = 'metric-card';
                 const colorA = state.droneColors[o.drone_a];
                 const colorB = state.droneColors[o.drone_b];
+
+                let compareHtml = '';
+                if (state.windActive && state.originalOverlaps[idx]) {
+                    const orig = state.originalOverlaps[idx].overlap_ratio * 100;
+                    const wind = o.overlap_ratio * 100;
+                    const diff = wind - orig;
+                    const cls = diff > 0 ? 'metric-change-up' : 'metric-change-down';
+                    const sign = diff >= 0 ? '+' : '';
+                    compareHtml = `<span class="${cls}">${sign}${diff.toFixed(1)}%</span>`;
+                }
+
                 div.innerHTML = `
                     <div class="metric-label">
                         <span style="color:${colorA}">${o.drone_a}</span> ↔ 
                         <span style="color:${colorB}">${o.drone_b}</span>
                     </div>
-                    <div class="metric-value">${(o.overlap_ratio * 100).toFixed(1)}%</div>
+                    <div class="metric-compare">
+                        ${state.windActive && state.originalOverlaps[idx] ? `<span class="metric-original">${(state.originalOverlaps[idx].overlap_ratio * 100).toFixed(1)}%</span>` : ''}
+                        <span class="metric-wind" style="color:${state.windActive ? '#ff9f43' : '#fff'}">${(o.overlap_ratio * 100).toFixed(1)}%</span>
+                        ${compareHtml}
+                    </div>
                     <div class="overlap-bar">
-                        <div class="overlap-fill" style="width:${o.overlap_ratio * 100}%"></div>
+                        <div class="overlap-fill" style="width:${o.overlap_ratio * 100}%;${state.windActive ? 'background:linear-gradient(90deg,#ff9f43,#ff6348)' : ''}"></div>
                     </div>
                     <div class="metric-sub">重叠 ${o.overlap_points_count}/${o.total_points_count} 个采样点</div>
                 `;
                 overlapMetrics.appendChild(div);
             });
-            if (state.overlaps.length === 0) {
+            if (overlapData.length === 0) {
                 overlapMetrics.innerHTML = '<div style="font-size:12px;color:#666;">暂无数据</div>';
             }
         }
@@ -1066,6 +1350,107 @@
             }
         }
 
+        function orig_dist(idx) {
+            if (state.originalShortestDistances[idx]) {
+                return state.originalShortestDistances[idx].distance.toFixed(2) + ' m';
+            }
+            return '';
+        }
+
+        function getDronePositionAtTimeWind(droneId, time) {
+            const traj = state.windTrajectories.find(t => t.drone_id === droneId);
+            if (!traj || traj.points.length === 0) return null;
+            const points = traj.points;
+            time = safeNum(time);
+            if (time <= safeNum(points[0].timestamp) + SAFE_EPS) return safePos(points[0]);
+            if (time >= safeNum(points[points.length - 1].timestamp) - SAFE_EPS) return safePos(points[points.length - 1]);
+            for (let i = 0; i < points.length - 1; i++) {
+                const t0 = safeNum(points[i].timestamp);
+                const t1 = safeNum(points[i + 1].timestamp);
+                if (t0 <= time && time <= t1) {
+                    const dt = t1 - t0;
+                    let ratio = 0;
+                    if (Math.abs(dt) > SAFE_EPS) {
+                        ratio = Math.max(0, Math.min(1, (time - t0) / dt));
+                    }
+                    const p0 = safePos(points[i]);
+                    const p1 = safePos(points[i + 1]);
+                    return {
+                        x: p0.x + ratio * (p1.x - p0.x),
+                        y: p0.y + ratio * (p1.y - p0.y),
+                        z: p0.z + ratio * (p1.z - p0.z),
+                        battery: p0.battery + ratio * (p1.battery - p0.battery)
+                    };
+                }
+            }
+            return safePos(points[0]);
+        }
+
+        const BEAUFORT_SPEED = [0, 0.3, 1.6, 3.4, 5.5, 8.0, 10.8, 13.9, 17.2, 20.8, 24.5, 28.5, 32.7];
+
+        function beaufortToMps(level) {
+            level = Math.max(0, Math.min(12, level));
+            const lo = Math.floor(level);
+            const hi = Math.min(lo + 1, 12);
+            const frac = level - lo;
+            return BEAUFORT_SPEED[lo] + frac * (BEAUFORT_SPEED[hi] - BEAUFORT_SPEED[lo]);
+        }
+
+        function updateWindInfo() {
+            const angle = parseFloat(document.getElementById('windAngleSlider').value);
+            const level = parseFloat(document.getElementById('windLevelSlider').value);
+            state.windAngle = angle;
+            state.windLevel = level;
+            document.getElementById('windAngleVal').textContent = angle + '°';
+            document.getElementById('windLevelVal').textContent = level + '级';
+            const speed = beaufortToMps(level);
+            const rad = angle * Math.PI / 180;
+            const dx = (speed * Math.cos(rad)).toFixed(1);
+            const dy = (speed * Math.sin(rad)).toFixed(1);
+            const dz = (speed * 0.05).toFixed(2);
+            document.getElementById('windInfo').textContent = `风速: ${speed.toFixed(1)} m/s | 偏移向量: (${dx}, ${dy}, ${dz}) m/s`;
+        }
+
+        async function applyWindAnalysis() {
+            const btn = document.getElementById('windApplyBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ 正在解算...';
+            try {
+                const res = await fetch(`${API_BASE}/api/analyze-wind?wind_angle=${state.windAngle}&wind_level=${state.windLevel}&overlap_threshold=50`);
+                if (!res.ok) throw new Error('风场分析接口失败');
+                const data = await res.json();
+
+                state.originalShortestDistances = data.original_shortest_distances;
+                state.originalOverlaps = data.original_overlaps;
+                state.windShortestDistances = data.wind_shortest_distances;
+                state.windOverlaps = data.wind_overlaps;
+                state.windTrajectories = data.wind_trajectories;
+                state.windVector = data.wind_vector;
+                state.windSpeedMps = data.wind_speed_mps;
+                state.windActive = true;
+
+                document.getElementById('windBadge').style.display = 'inline-block';
+            } catch (err) {
+                console.error(err);
+                alert('风场解算失败: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🌀 加入风场重新解算';
+            }
+        }
+
+        function resetWind() {
+            state.windActive = false;
+            state.windTrajectories = [];
+            state.windShortestDistances = [];
+            state.windOverlaps = [];
+            state.originalShortestDistances = [];
+            state.originalOverlaps = [];
+            state.windVector = [0, 0, 0];
+            state.windSpeedMps = 0;
+            document.getElementById('windBadge').style.display = 'none';
+        }
+
         document.getElementById('playBtn').addEventListener('click', function () {
             state.isPlaying = !state.isPlaying;
             this.textContent = state.isPlaying ? '⏸' : '▶';
@@ -1105,6 +1490,14 @@
         setupToggle('toggleOverlap', 'showOverlap');
         setupToggle('toggleDistance', 'showDistance');
         setupToggle('toggleGrid', 'showGrid');
+        setupToggle('toggleWindTrajectory', 'showWindTrajectory');
+
+        document.getElementById('windAngleSlider').addEventListener('input', updateWindInfo);
+        document.getElementById('windLevelSlider').addEventListener('input', updateWindInfo);
+        document.getElementById('windApplyBtn').addEventListener('click', applyWindAnalysis);
+        document.getElementById('windResetBtn').addEventListener('click', resetWind);
+
+        updateWindInfo();
 
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();

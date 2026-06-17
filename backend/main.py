@@ -10,8 +10,8 @@ from fastapi.responses import FileResponse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from models import (
-    DroneTrajectory, ShortestDistanceResult, OverlapResult,
-    AnalysisResponse, FrameData
+    DronePoint, DroneTrajectory, ShortestDistanceResult, OverlapResult,
+    AnalysisResponse, FrameData, WindAnalysisResponse
 )
 from log_parser import (
     load_logs_from_dir, all_trajectories_to_numpy,
@@ -20,7 +20,8 @@ from log_parser import (
 from calculator import (
     compute_all_shortest_distances, compute_all_overlaps,
     get_time_range, interpolate_position, get_overlap_region_points,
-    euclidean_distance_3d, _safe_value
+    euclidean_distance_3d, _safe_value,
+    apply_wind_to_all_trajectories, compute_wind_vector, beaufort_to_mps
 )
 import numpy as np
 import traceback
@@ -179,6 +180,74 @@ async def get_overlap_regions(overlap_threshold: Optional[float] = 50.0):
                     "points": region_points
                 })
     return {"regions": regions}
+
+
+def _numpy_traj_to_model(did: str, traj_np: np.ndarray) -> DroneTrajectory:
+    points = []
+    for i in range(len(traj_np)):
+        row = traj_np[i]
+        points.append(DronePoint(
+            timestamp=float(row[0]) if np.isfinite(row[0]) else 0.0,
+            x=float(row[1]) if np.isfinite(row[1]) else 0.0,
+            y=float(row[2]) if np.isfinite(row[2]) else 0.0,
+            z=float(row[3]) if np.isfinite(row[3]) else 0.0,
+            battery=float(row[4]) if np.isfinite(row[4]) else 0.0
+        ))
+    return DroneTrajectory(drone_id=did, points=points)
+
+
+@app.get("/api/analyze-wind", response_model=WindAnalysisResponse)
+async def analyze_with_wind(
+    wind_angle: float = 0.0,
+    wind_level: float = 0.0,
+    overlap_threshold: Optional[float] = 50.0
+):
+    try:
+        trajectories = load_logs_from_dir(LOG_DIR)
+        if not trajectories:
+            raise HTTPException(status_code=404, detail="未找到日志文件")
+
+        traj_np = all_trajectories_to_numpy(trajectories)
+        for did in traj_np:
+            traj_np[did] = _safe_value(traj_np[did])
+
+        original_distances = compute_all_shortest_distances(traj_np)
+        original_overlaps = compute_all_overlaps(traj_np, threshold=overlap_threshold)
+
+        wind_traj_np = apply_wind_to_all_trajectories(traj_np, wind_angle, wind_level)
+        for did in wind_traj_np:
+            wind_traj_np[did] = _safe_value(wind_traj_np[did])
+
+        wind_distances = compute_all_shortest_distances(wind_traj_np)
+        wind_overlaps = compute_all_overlaps(wind_traj_np, threshold=overlap_threshold)
+
+        t_min, t_max = get_time_range(traj_np)
+        if not np.isfinite(t_min): t_min = 0.0
+        if not np.isfinite(t_max): t_max = 1.0
+
+        wind_speed_mps = beaufort_to_mps(wind_level)
+        wind_vector = compute_wind_vector(wind_angle, wind_level)
+
+        original_traj_models = [_numpy_traj_to_model(did, traj_np[did]) for did in traj_np]
+        wind_traj_models = [_numpy_traj_to_model(did, wind_traj_np[did]) for did in wind_traj_np]
+
+        return WindAnalysisResponse(
+            wind_angle=float(wind_angle),
+            wind_level=float(wind_level),
+            wind_speed_mps=float(wind_speed_mps),
+            wind_vector=[float(x) if np.isfinite(x) else 0.0 for x in wind_vector.tolist()],
+            original_trajectories=original_traj_models,
+            wind_trajectories=wind_traj_models,
+            original_shortest_distances=original_distances,
+            wind_shortest_distances=wind_distances,
+            original_overlaps=original_overlaps,
+            wind_overlaps=wind_overlaps,
+            time_range=[float(t_min), float(t_max)]
+        )
+    except Exception as e:
+        print(f"[ERROR] analyze_with_wind failed: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"风场分析错误: {str(e)}")
 
 
 if __name__ == "__main__":

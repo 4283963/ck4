@@ -234,3 +234,77 @@ def get_time_range(trajectories: Dict[str, np.ndarray]) -> Tuple[float, float]:
     all_t_min = min(t[0, 0] for t in trajectories.values())
     all_t_max = max(t[-1, 0] for t in trajectories.values())
     return float(all_t_min), float(all_t_max)
+
+
+BEAUFORT_SPEED_MAP = {
+    0: 0.0, 1: 0.3, 2: 1.6, 3: 3.4, 4: 5.5,
+    5: 8.0, 6: 10.8, 7: 13.9, 8: 17.2, 9: 20.8,
+    10: 24.5, 11: 28.5, 12: 32.7
+}
+
+
+def beaufort_to_mps(level: float) -> float:
+    level = max(0.0, min(12.0, float(level)))
+    lo = int(level)
+    hi = min(lo + 1, 12)
+    frac = level - lo
+    speed_lo = BEAUFORT_SPEED_MAP.get(lo, 0.0)
+    speed_hi = BEAUFORT_SPEED_MAP.get(hi, speed_lo)
+    return speed_lo + frac * (speed_hi - speed_lo)
+
+
+def compute_wind_vector(wind_angle_deg: float, wind_level: float) -> np.ndarray:
+    wind_speed_mps = beaufort_to_mps(wind_level)
+    if wind_speed_mps < SAFE_EPS:
+        return np.zeros(3)
+    angle_rad = np.deg2rad(float(wind_angle_deg))
+    dx = wind_speed_mps * np.cos(angle_rad)
+    dy = wind_speed_mps * np.sin(angle_rad)
+    dz = wind_speed_mps * 0.05
+    return np.array([dx, dy, dz])
+
+
+def apply_wind_to_trajectory(
+    traj: np.ndarray,
+    wind_vector: np.ndarray,
+    t_start: float
+) -> np.ndarray:
+    if traj is None or len(traj) == 0:
+        return np.zeros((0, 5))
+
+    traj = _safe_value(traj.copy())
+    wind_vector = _safe_value(wind_vector)
+
+    if np.all(np.abs(wind_vector) < SAFE_EPS):
+        return traj
+
+    for i in range(len(traj)):
+        t = float(traj[i, 0])
+        dt = max(0.0, t - t_start)
+        drift = wind_vector * dt
+        traj[i, 1] += drift[0]
+        traj[i, 2] += drift[1]
+        traj[i, 3] += drift[2]
+
+    return _safe_value(traj)
+
+
+def apply_wind_to_all_trajectories(
+    trajectories: Dict[str, np.ndarray],
+    wind_angle_deg: float,
+    wind_level: float
+) -> Dict[str, np.ndarray]:
+    wind_vector = compute_wind_vector(wind_angle_deg, wind_level)
+    if np.all(np.abs(wind_vector) < SAFE_EPS):
+        return trajectories
+
+    all_times = []
+    for traj in trajectories.values():
+        if len(traj) > 0:
+            all_times.append(float(traj[0, 0]))
+    t_start = min(all_times) if all_times else 0.0
+
+    result = {}
+    for did, traj in trajectories.items():
+        result[did] = apply_wind_to_trajectory(traj, wind_vector, t_start)
+    return result
