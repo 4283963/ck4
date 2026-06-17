@@ -2,24 +2,52 @@ import numpy as np
 from typing import List, Dict, Tuple
 from models import ShortestDistanceResult, OverlapResult
 
+EPS = 1e-8
+SAFE_EPS = 1e-6
+
+
+def _safe_value(val: np.ndarray, default: float = 0.0) -> np.ndarray:
+    return np.where(np.isfinite(val), val, default)
+
 
 def euclidean_distance_3d(p1: np.ndarray, p2: np.ndarray) -> float:
-    return float(np.sqrt(np.sum((p1 - p2) ** 2)))
+    diff = _safe_value(p1) - _safe_value(p2)
+    sq_sum = np.sum(diff ** 2)
+    if not np.isfinite(sq_sum) or sq_sum < 0:
+        return 0.0
+    return float(np.sqrt(sq_sum))
 
 
 def interpolate_position(traj: np.ndarray, target_time: float) -> np.ndarray:
+    if traj is None or len(traj) == 0:
+        return np.zeros(3)
+
+    traj = _safe_value(traj)
     timestamps = traj[:, 0]
-    if target_time <= timestamps[0]:
-        return traj[0, 1:4]
-    if target_time >= timestamps[-1]:
-        return traj[-1, 1:4]
+
+    if len(timestamps) == 1:
+        return _safe_value(traj[0, 1:4])
+
+    if target_time <= timestamps[0] + EPS:
+        return _safe_value(traj[0, 1:4])
+    if target_time >= timestamps[-1] - EPS:
+        return _safe_value(traj[-1, 1:4])
+
     idx = np.searchsorted(timestamps, target_time) - 1
     idx = max(0, min(idx, len(timestamps) - 2))
-    t0, t1 = timestamps[idx], timestamps[idx + 1]
-    ratio = (target_time - t0) / (t1 - t0) if t1 != t0 else 0.0
-    p0 = traj[idx, 1:4]
-    p1 = traj[idx + 1, 1:4]
-    return p0 + ratio * (p1 - p0)
+    t0, t1 = float(timestamps[idx]), float(timestamps[idx + 1])
+    dt = t1 - t0
+
+    if abs(dt) < SAFE_EPS:
+        return _safe_value(traj[idx, 1:4])
+
+    ratio = (target_time - t0) / dt
+    ratio = max(0.0, min(1.0, ratio))
+
+    p0 = _safe_value(traj[idx, 1:4])
+    p1 = _safe_value(traj[idx + 1, 1:4])
+    result = p0 + ratio * (p1 - p0)
+    return _safe_value(result)
 
 
 def compute_shortest_distance_between_pair(
@@ -27,35 +55,56 @@ def compute_shortest_distance_between_pair(
     traj_b: np.ndarray, traj_b_id: str,
     sample_rate: float = 0.1
 ) -> ShortestDistanceResult:
-    t_min = max(traj_a[0, 0], traj_b[0, 0])
-    t_max = min(traj_a[-1, 0], traj_b[-1, 0])
-    if t_min >= t_max:
+    if traj_a is None or traj_b is None or len(traj_a) == 0 or len(traj_b) == 0:
+        return ShortestDistanceResult(
+            drone_a=traj_a_id, drone_b=traj_b_id,
+            distance=float('inf'), timestamp=0.0,
+            point_a=[0, 0, 0], point_b=[0, 0, 0]
+        )
+
+    traj_a = _safe_value(traj_a)
+    traj_b = _safe_value(traj_b)
+
+    t_min = max(float(traj_a[0, 0]), float(traj_b[0, 0]))
+    t_max = min(float(traj_a[-1, 0]), float(traj_b[-1, 0]))
+
+    if t_min + SAFE_EPS >= t_max:
         return ShortestDistanceResult(
             drone_a=traj_a_id, drone_b=traj_b_id,
             distance=float('inf'), timestamp=t_min,
             point_a=[0, 0, 0], point_b=[0, 0, 0]
         )
 
-    timestamps = np.arange(t_min, t_max + sample_rate, sample_rate)
+    if sample_rate < SAFE_EPS:
+        sample_rate = 0.1
+
+    n_samples = int((t_max - t_min) / sample_rate) + 1
+    n_samples = max(2, min(n_samples, 10000))
+    timestamps = np.linspace(t_min, t_max, num=n_samples)
+
     min_dist = float('inf')
     min_t = t_min
     min_pa = np.zeros(3)
     min_pb = np.zeros(3)
 
     for t in timestamps:
-        pa = interpolate_position(traj_a, t)
-        pb = interpolate_position(traj_b, t)
+        pa = interpolate_position(traj_a, float(t))
+        pb = interpolate_position(traj_b, float(t))
         dist = euclidean_distance_3d(pa, pb)
-        if dist < min_dist:
+        if np.isfinite(dist) and dist < min_dist:
             min_dist = dist
-            min_t = t
+            min_t = float(t)
             min_pa = pa
             min_pb = pb
+
+    if not np.isfinite(min_dist):
+        min_dist = 0.0
 
     return ShortestDistanceResult(
         drone_a=traj_a_id, drone_b=traj_b_id,
         distance=min_dist, timestamp=float(min_t),
-        point_a=min_pa.tolist(), point_b=min_pb.tolist()
+        point_a=_safe_value(min_pa).tolist(),
+        point_b=_safe_value(min_pb).tolist()
     )
 
 
@@ -80,28 +129,45 @@ def compute_trajectory_overlap(
     traj_b: np.ndarray, traj_b_id: str,
     threshold: float = 50.0
 ) -> OverlapResult:
-    all_times_a = traj_a[:, 0]
-    all_times_b = traj_b[:, 0]
-    t_min = max(all_times_a[0], all_times_b[0])
-    t_max = min(all_times_a[-1], all_times_b[-1])
-    if t_min >= t_max:
+    if traj_a is None or traj_b is None or len(traj_a) == 0 or len(traj_b) == 0:
         return OverlapResult(
             drone_a=traj_a_id, drone_b=traj_b_id,
             overlap_ratio=0.0, overlap_points_count=0,
             total_points_count=0
         )
 
-    sample_times = np.linspace(t_min, t_max, num=100)
-    overlap_count = 0
-    for t in sample_times:
-        pa = interpolate_position(traj_a, t)
-        pb = interpolate_position(traj_b, t)
-        dist = euclidean_distance_3d(pa, pb)
-        if dist <= threshold:
-            overlap_count += 1
+    traj_a = _safe_value(traj_a)
+    traj_b = _safe_value(traj_b)
 
-    total_count = len(sample_times)
+    all_times_a = traj_a[:, 0]
+    all_times_b = traj_b[:, 0]
+    t_min = max(float(all_times_a[0]), float(all_times_b[0]))
+    t_max = min(float(all_times_a[-1]), float(all_times_b[-1]))
+
+    if t_min + SAFE_EPS >= t_max:
+        return OverlapResult(
+            drone_a=traj_a_id, drone_b=traj_b_id,
+            overlap_ratio=0.0, overlap_points_count=0,
+            total_points_count=0
+        )
+
+    n_samples = 100
+    sample_times = np.linspace(t_min, t_max, num=n_samples)
+    overlap_count = 0
+    total_count = 0
+
+    for t in sample_times:
+        pa = interpolate_position(traj_a, float(t))
+        pb = interpolate_position(traj_b, float(t))
+        dist = euclidean_distance_3d(pa, pb)
+        if np.isfinite(dist) and dist <= threshold:
+            overlap_count += 1
+        total_count += 1
+
     ratio = overlap_count / total_count if total_count > 0 else 0.0
+    if not np.isfinite(ratio):
+        ratio = 0.0
+
     return OverlapResult(
         drone_a=traj_a_id, drone_b=traj_b_id,
         overlap_ratio=float(ratio),
@@ -133,18 +199,32 @@ def get_overlap_region_points(
     threshold: float = 50.0,
     sample_rate: float = 0.5
 ) -> List[Tuple[np.ndarray, np.ndarray, float]]:
-    t_min = max(traj_a[0, 0], traj_b[0, 0])
-    t_max = min(traj_a[-1, 0], traj_b[-1, 0])
-    if t_min >= t_max:
+    if traj_a is None or traj_b is None or len(traj_a) == 0 or len(traj_b) == 0:
         return []
-    timestamps = np.arange(t_min, t_max + sample_rate, sample_rate)
+
+    traj_a = _safe_value(traj_a)
+    traj_b = _safe_value(traj_b)
+
+    t_min = max(float(traj_a[0, 0]), float(traj_b[0, 0]))
+    t_max = min(float(traj_a[-1, 0]), float(traj_b[-1, 0]))
+
+    if t_min + SAFE_EPS >= t_max:
+        return []
+
+    if sample_rate < SAFE_EPS:
+        sample_rate = 0.5
+
+    n_samples = int((t_max - t_min) / sample_rate) + 1
+    n_samples = max(2, min(n_samples, 5000))
+    timestamps = np.linspace(t_min, t_max, num=n_samples)
+
     overlap_points = []
     for t in timestamps:
-        pa = interpolate_position(traj_a, t)
-        pb = interpolate_position(traj_b, t)
+        pa = interpolate_position(traj_a, float(t))
+        pb = interpolate_position(traj_b, float(t))
         dist = euclidean_distance_3d(pa, pb)
-        if dist <= threshold:
-            overlap_points.append((pa, pb, float(t)))
+        if np.isfinite(dist) and dist <= threshold:
+            overlap_points.append((_safe_value(pa), _safe_value(pb), float(t)))
     return overlap_points
 
 

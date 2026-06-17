@@ -547,6 +547,23 @@
         const canvas = document.getElementById('trajectoryCanvas');
         const ctx = canvas.getContext('2d');
 
+        const EPS = 1e-8;
+        const SAFE_EPS = 1e-6;
+
+        function safeNum(val, def = 0) {
+            return (val === null || val === undefined || typeof val !== 'number' || isNaN(val) || !isFinite(val)) ? def : val;
+        }
+
+        function safePos(pos) {
+            if (!pos) return { x: 0, y: 0, z: 0, battery: 0 };
+            return {
+                x: safeNum(pos.x),
+                y: safeNum(pos.y),
+                z: safeNum(pos.z),
+                battery: safeNum(pos.battery)
+            };
+        }
+
         function resizeCanvas() {
             const container = canvas.parentElement;
             const rect = container.getBoundingClientRect();
@@ -570,19 +587,27 @@
             if (!traj || traj.points.length === 0) return null;
 
             const points = traj.points;
-            if (time <= points[0].timestamp) {
-                return { x: points[0].x, y: points[0].y, z: points[0].z, battery: points[0].battery };
+            time = safeNum(time);
+
+            if (time <= safeNum(points[0].timestamp) + SAFE_EPS) {
+                return safePos(points[0]);
             }
-            if (time >= points[points.length - 1].timestamp) {
-                const p = points[points.length - 1];
-                return { x: p.x, y: p.y, z: p.z, battery: p.battery };
+            if (time >= safeNum(points[points.length - 1].timestamp) - SAFE_EPS) {
+                return safePos(points[points.length - 1]);
             }
 
             for (let i = 0; i < points.length - 1; i++) {
-                if (points[i].timestamp <= time && time <= points[i + 1].timestamp) {
-                    const p0 = points[i];
-                    const p1 = points[i + 1];
-                    const ratio = p1.timestamp === p0.timestamp ? 0 : (time - p0.timestamp) / (p1.timestamp - p0.timestamp);
+                const t0 = safeNum(points[i].timestamp);
+                const t1 = safeNum(points[i + 1].timestamp);
+                if (t0 <= time && time <= t1) {
+                    const dt = t1 - t0;
+                    let ratio = 0;
+                    if (Math.abs(dt) > SAFE_EPS) {
+                        ratio = (time - t0) / dt;
+                        ratio = Math.max(0, Math.min(1, ratio));
+                    }
+                    const p0 = safePos(points[i]);
+                    const p1 = safePos(points[i + 1]);
                     return {
                         x: p0.x + ratio * (p1.x - p0.x),
                         y: p0.y + ratio * (p1.y - p0.y),
@@ -591,33 +616,43 @@
                     };
                 }
             }
-            return null;
+            return safePos(points[0]);
         }
 
         function worldToScreen(x, y, z) {
-            const w = canvas.width / (window.devicePixelRatio || 1);
-            const h = canvas.height / (window.devicePixelRatio || 1);
+            x = safeNum(x);
+            y = safeNum(y);
+            z = safeNum(z);
+
+            const w = Math.max(1, canvas.width / (window.devicePixelRatio || 1));
+            const h = Math.max(1, canvas.height / (window.devicePixelRatio || 1));
             const padding = 40;
 
-            const rangeX = state.bounds.maxX - state.bounds.minX;
-            const rangeY = state.bounds.maxY - state.bounds.minY;
-            const rangeZ = state.bounds.maxZ - state.bounds.minZ;
+            let rangeX = safeNum(state.bounds.maxX - state.bounds.minX);
+            let rangeY = safeNum(state.bounds.maxY - state.bounds.minY);
+            let rangeZ = safeNum(state.bounds.maxZ - state.bounds.minZ);
 
-            let sx, sy;
+            if (Math.abs(rangeX) < SAFE_EPS) rangeX = 1.0;
+            if (Math.abs(rangeY) < SAFE_EPS) rangeY = 1.0;
+            if (Math.abs(rangeZ) < SAFE_EPS) rangeZ = 1.0;
+
+            let sx = w / 2;
+            let sy = h / 2;
             const scale = Math.min((w - 2 * padding) / rangeX, (h - 2 * padding) / Math.max(rangeY, rangeZ));
+            const safeScale = isFinite(scale) && scale > 0 ? scale : 1.0;
 
             switch (state.viewMode) {
                 case 'xy':
-                    sx = padding + (x - state.bounds.minX) * scale;
-                    sy = h - padding - (y - state.bounds.minY) * scale;
+                    sx = padding + (x - state.bounds.minX) * safeScale;
+                    sy = h - padding - (y - state.bounds.minY) * safeScale;
                     break;
                 case 'xz':
-                    sx = padding + (x - state.bounds.minX) * scale;
-                    sy = h - padding - (z - state.bounds.minZ) * scale;
+                    sx = padding + (x - state.bounds.minX) * safeScale;
+                    sy = h - padding - (z - state.bounds.minZ) * safeScale;
                     break;
                 case 'yz':
-                    sx = padding + (y - state.bounds.minY) * scale;
-                    sy = h - padding - (z - state.bounds.minZ) * scale;
+                    sx = padding + (y - state.bounds.minY) * safeScale;
+                    sy = h - padding - (z - state.bounds.minZ) * safeScale;
                     break;
                 case '3d':
                     const angleX = 30 * Math.PI / 180;
@@ -631,11 +666,11 @@
                     const rz = dz;
                     const finalX = rx;
                     const finalY = ry * Math.cos(angleX) - rz * Math.sin(angleX);
-                    sx = w / 2 + finalX * scale * 0.8;
-                    sy = h / 2 + finalY * scale * 0.8;
+                    sx = w / 2 + finalX * safeScale * 0.8;
+                    sy = h / 2 + finalY * safeScale * 0.8;
                     break;
             }
-            return { x: sx, y: sy };
+            return { x: safeNum(sx, w / 2), y: safeNum(sy, h / 2) };
         }
 
         function drawGrid() {
@@ -787,9 +822,8 @@
             const ids = Object.keys(currentPositions);
             for (let i = 0; i < ids.length; i++) {
                 for (let j = i + 1; j < ids.length; j++) {
-                    const posA = currentPositions[ids[i]];
-                    const posB = currentPositions[ids[j]];
-                    if (!posA || !posB) continue;
+                    const posA = safePos(currentPositions[ids[i]]);
+                    const posB = safePos(currentPositions[ids[j]]);
 
                     const sA = worldToScreen(posA.x, posA.y, posA.z);
                     const sB = worldToScreen(posB.x, posB.y, posB.z);
@@ -797,10 +831,12 @@
                     const dx = posA.x - posB.x;
                     const dy = posA.y - posB.y;
                     const dz = posA.z - posB.z;
-                    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                    const sq = dx * dx + dy * dy + dz * dz;
+                    const dist = sq >= 0 && isFinite(sq) ? Math.sqrt(sq) : 0;
+                    const safeDist = safeNum(dist, 0);
 
-                    ctx.strokeStyle = dist < 50 ? 'rgba(255, 107, 107, 0.6)' : 'rgba(255, 255, 255, 0.2)';
-                    ctx.lineWidth = dist < 50 ? 2 : 1;
+                    ctx.strokeStyle = safeDist < 50 ? 'rgba(255, 107, 107, 0.6)' : 'rgba(255, 255, 255, 0.2)';
+                    ctx.lineWidth = safeDist < 50 ? 2 : 1;
                     ctx.setLineDash([5, 5]);
                     ctx.beginPath();
                     ctx.moveTo(sA.x, sA.y);
@@ -810,10 +846,10 @@
 
                     const midX = (sA.x + sB.x) / 2;
                     const midY = (sA.y + sB.y) / 2;
-                    ctx.fillStyle = dist < 50 ? '#ff6b6b' : 'rgba(255, 255, 255, 0.5)';
+                    ctx.fillStyle = safeDist < 50 ? '#ff6b6b' : 'rgba(255, 255, 255, 0.5)';
                     ctx.font = 'bold 11px monospace';
                     ctx.textAlign = 'center';
-                    ctx.fillText(dist.toFixed(1) + 'm', midX, midY - 5);
+                    ctx.fillText(safeDist.toFixed(1) + 'm', midX, midY - 5);
                 }
             }
         }
@@ -950,11 +986,14 @@
 
             if (state.isPlaying) {
                 state.currentTime += delta * state.playSpeed;
-                if (state.currentTime > state.timeRange[1]) {
-                    state.currentTime = state.timeRange[0];
+                const t0 = safeNum(state.timeRange[0]);
+                const t1 = safeNum(state.timeRange[1]);
+                if (state.currentTime > t1) {
+                    state.currentTime = t0;
                 }
-                const progress = ((state.currentTime - state.timeRange[0]) / (state.timeRange[1] - state.timeRange[0])) * 100;
-                document.getElementById('progressSlider').value = progress;
+                const dt = t1 - t0;
+                const progress = Math.abs(dt) > SAFE_EPS ? ((state.currentTime - t0) / dt) * 100 : 0;
+                document.getElementById('progressSlider').value = safeNum(progress, 0);
                 document.getElementById('timeDisplay').textContent = formatTime(state.currentTime);
             }
 
@@ -986,16 +1025,25 @@
                 let minZ = Infinity, maxZ = -Infinity;
                 state.trajectories.forEach(traj => {
                     traj.points.forEach(p => {
-                        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
-                        minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
-                        minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
+                        const px = safeNum(p.x), py = safeNum(p.y), pz = safeNum(p.z);
+                        minX = Math.min(minX, px); maxX = Math.max(maxX, px);
+                        minY = Math.min(minY, py); maxY = Math.max(maxY, py);
+                        minZ = Math.min(minZ, pz); maxZ = Math.max(maxZ, pz);
                     });
                 });
+
+                if (!isFinite(minX) || !isFinite(maxX)) { minX = 0; maxX = 100; }
+                if (!isFinite(minY) || !isFinite(maxY)) { minY = 0; maxY = 100; }
+                if (!isFinite(minZ) || !isFinite(maxZ)) { minZ = 0; maxZ = 100; }
+
                 const pad = 20;
                 state.bounds = {
-                    minX: minX - pad, maxX: maxX + pad,
-                    minY: minY - pad, maxY: maxY + pad,
-                    minZ: Math.max(0, minZ - pad), maxZ: maxZ + pad
+                    minX: safeNum(minX - pad, 0),
+                    maxX: safeNum(maxX + pad, 100),
+                    minY: safeNum(minY - pad, 0),
+                    maxY: safeNum(maxY + pad, 100),
+                    minZ: safeNum(Math.max(0, minZ - pad), 0),
+                    maxZ: safeNum(maxZ + pad, 100)
                 };
 
                 const overlapRes = await fetch(`${API_BASE}/api/overlap-regions?overlap_threshold=50`);
@@ -1028,8 +1076,10 @@
         });
 
         document.getElementById('progressSlider').addEventListener('input', function (e) {
-            const progress = parseFloat(e.target.value) / 100;
-            state.currentTime = state.timeRange[0] + progress * (state.timeRange[1] - state.timeRange[0]);
+            const progress = safeNum(parseFloat(e.target.value), 0) / 100;
+            const t0 = safeNum(state.timeRange[0]);
+            const t1 = safeNum(state.timeRange[1]);
+            state.currentTime = t0 + Math.max(0, Math.min(1, progress)) * (t1 - t0);
             document.getElementById('timeDisplay').textContent = formatTime(state.currentTime);
         });
 
